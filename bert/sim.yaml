@@ -1,0 +1,51 @@
+spec: "1.0"
+
+devices:
+  N4962A:
+    eom:
+      GPIB INSTR:
+        q: "\n"
+        r: "\n"
+    dialogues:
+      - q: "*IDN?"
+        r: "CENTELLAX, TG1B1-A BERT, SN5048, 1.38"
+      - q: "*CLS"
+      - q: ":SOURce:ROSCillator:SOURce?"
+        r: "INT"
+      - q: ":SOURce:ROSCillator:INTernal:FREQuency?"
+        r: "10000"
+      - q: ":SOURce:ROSCillator:JITTer?"
+        r: "OFF"
+      - q: ":SOURce:PATTern?"
+        r: "PRBS31"
+      - q: ":SOURce:PRBS:MARKspace?"
+        r: "MS2"
+      - q: ":SOURce:PRBS:INVert?"
+        r: "OFF"
+      - q: ":SOURce:PRBS:IERR:RATe?"
+        r: "OFF"
+      - q: ":SOURce:VOLTage:AMPLitude?"
+        r: "500"
+      - q: ":MODe?"
+        r: "OFF"
+      - q: ":SENSe:NOData?"
+        r: "OFF"
+      - q: ":SENSe:ROSCillator:PHASe?"
+        r: "180"
+      - q: ":SENSe:SWEep:TIME?"
+        r: "10"
+      - q: ":SENSe:TRAIn?"
+        r: "120"
+      - q: ":SENSe:DATA? ECOunt"
+        r: "0.00000e0"
+      - q: ":SENSe:DATA? BCOunt"
+        r: "1.00000e10"
+      - q: ":SENSe:DATA? BER"
+        r: "0.00000e0"
+      - q: ":TRIGger:SAMPle"
+      - q: ":TRIGger:INITiate"
+      - q: ":TRIGger:ABORt"
+
+resources:
+  GPIB0::18::INSTR:
+    device: N4962A

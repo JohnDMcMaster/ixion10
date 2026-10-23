@@ -1,0 +1,115 @@
+From: Tom Keller <tom@tompkel.net>
+Subject: gpib: agilent_82357a: Support firmware-bearing 82357B clones
+
+Adapted to the Linux-GPIB 4.3.7 out-of-tree source from the upstream v3
+patch posted on 2026-09-10:
+https://lists.openwall.net/linux-kernel/2026/09/10/884
+
+Some adapters marked as Agilent/Keysight 82357B are clones that contain
+their own firmware. They do not support XFER_STATUS and need slightly
+relaxed timing. Detect clone adapters that fail a firmware CPUCS read and
+work around their quirks.
+
+--- a/drivers/gpib/agilent_82357a/agilent_82357a.c
++++ b/drivers/gpib/agilent_82357a/agilent_82357a.c
+@@ -566,7 +566,7 @@ static ssize_t agilent_82357a_generic_write(struct gpib_board *board,
+ 	out_data[i++] = 0; // secondary address when AWF_NO_ADDRESS is not set
+ 	out_data[i] = AWF_NO_ADDRESS | AWF_NO_FAST_TALKER_FIRST_BYTE;
+ 	if (send_commands)
+-		out_data[i] |= AWF_ATN | AWF_NO_FAST_TALKER;
++		out_data[i] = AWF_ATN | AWF_NO_ADDRESS | AWF_NO_FAST_TALKER;
+ 	if (send_eoi)
+ 		out_data[i] |= AWF_SEND_EOI;
+ 	++i;
+@@ -650,6 +650,16 @@ static ssize_t agilent_82357a_generic_write(struct gpib_board *board,
+ 		return -ETIMEDOUT;
+ 	}
+ 
++	/*
++	 * Clone adapters do not answer XFER_STATUS, so use the count from
++	 * the write-complete interrupt.
++	 */
++	if (a_priv->is_clone_82357b) {
++		mutex_unlock(&a_priv->bulk_transfer_lock);
++		*bytes_written = a_priv->write_complete_count;
++		return 0;
++	}
++
+ 	status_data = kmalloc(STATUS_DATA_LEN, GFP_KERNEL);
+ 	if (!status_data) {
+ 		mutex_unlock(&a_priv->bulk_transfer_lock);
+@@ -1112,6 +1122,12 @@ static void agilent_82357a_interrupt_complete(struct urb *urb PT_REGS_ARG)
+ 	}
+ 
+ 	interrupt_flags = transfer_buffer[0];
++	if (urb->actual_length >= 6 && test_bit(AIF_WRITE_COMPLETE_BN, &interrupt_flags)) {
++		a_priv->write_complete_count  = (u32)transfer_buffer[2];
++		a_priv->write_complete_count |= (u32)transfer_buffer[3] << 8;
++		a_priv->write_complete_count |= (u32)transfer_buffer[4] << 16;
++		a_priv->write_complete_count |= (u32)transfer_buffer[5] << 24;
++	}
+ 	if (test_bit(AIF_READ_COMPLETE_BN, &interrupt_flags))
+ 		set_bit(AIF_READ_COMPLETE_BN, &a_priv->interrupt_flags);
+ 	if (test_bit(AIF_WRITE_COMPLETE_BN, &interrupt_flags))
+@@ -1211,6 +1227,27 @@ static void agilent_82357a_free_private(struct gpib_board *board)
+ 	board->private_data = NULL;
+ }
+ 
++static void agilent_82357a_detect_clone(struct agilent_82357a_priv *a_priv)
++{
++	struct usb_device *usb_dev = interface_to_usbdev(a_priv->bus_interface);
++	u8 *ret_data;
++	int retval;
++
++	ret_data = kmalloc(1, GFP_KERNEL);
++	if (!ret_data)
++		return;
++	retval = usb_control_msg(usb_dev, usb_rcvctrlpipe(usb_dev, 0), 0xA0,
++				 USB_DIR_IN | USB_TYPE_VENDOR | USB_RECIP_DEVICE,
++				 0xE600, 0, ret_data, 1, 100);
++	kfree(ret_data);
++	if (retval < 0) {
++		a_priv->is_clone_82357b = 1;
++		dev_info(&usb_dev->dev,
++			 "82357B clone with firmware detected (CPUCS read returned %i)\n",
++			 retval);
++	}
++}
++
+ #define INIT_NUM_REG_WRITES 18
+ static int agilent_82357a_init(struct gpib_board *board)
+ {
+@@ -1344,6 +1380,7 @@ static int agilent_82357a_attach(struct gpib_board *board, const struct gpib_boar
+ 	case USB_DEVICE_ID_AGILENT_82357B:
+ 		a_priv->bulk_out_endpoint = AGILENT_82357B_BULK_OUT_ENDPOINT;
+ 		a_priv->interrupt_in_endpoint = AGILENT_82357B_INTERRUPT_IN_ENDPOINT;
++		agilent_82357a_detect_clone(a_priv);
+ 		break;
+ 	default:
+ 		dev_err(&usb_dev->dev, "bug, unhandled product_id in switch?\n");
+@@ -1358,7 +1395,7 @@ static int agilent_82357a_attach(struct gpib_board *board, const struct gpib_boar
+ 
+ 	COMPAT_TIMER_SETUP(&a_priv->bulk_timer, agilent_82357a_timeout_handler, 0);
+ 
+-	board->t1_nano_sec = 800;
++	board->t1_nano_sec = 819;
+ 
+ 	retval = agilent_82357a_init(board);
+ 
+--- a/drivers/gpib/agilent_82357a/agilent_82357a.h
++++ b/drivers/gpib/agilent_82357a/agilent_82357a.h
+@@ -133,12 +133,14 @@ struct agilent_82357a_priv {
+ 	struct mutex bulk_alloc_lock;		// bulk transfer allocation lock
+ 	struct mutex interrupt_alloc_lock;	// interrupt allocation lock
+ 	struct mutex control_alloc_lock;	// control message allocation lock
++	u32 write_complete_count;		// bytes transferred in last write
+ 	struct timer_list bulk_timer;
+ 	struct agilent_82357a_urb_ctx context;
+ 	unsigned int bulk_out_endpoint;
+ 	unsigned int interrupt_in_endpoint;
+ 	unsigned is_cic : 1;
+ 	unsigned ren_state : 1;
++	unsigned is_clone_82357b : 1;
+ };
+ 
+ struct agilent_82357a_register_pairlet {

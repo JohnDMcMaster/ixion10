@@ -1,0 +1,27 @@
+[project]
+name = "tg1b1a-bert-gui"
+version = "0.1.0"
+description = "Control GUI for the Centellax TG1B1A / Keysight N4962A serial BERT"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "gpib-ctypes>=0.3.0",
+    "pyside6>=6.7",
+    "pyvisa>=1.14",
+    "pyvisa-py>=0.8.1",
+    "pyvisa-sim>=0.6",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = []
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
